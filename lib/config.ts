@@ -46,6 +46,14 @@ export interface RuntimeConfig {
         computeUnitLimit: number;
         treasuryTopupReserveSol: number;
     };
+    treasuryStrategy: {
+        enabled: boolean;
+        intervalMs: number;
+        liquidTargetSol: number;
+        liquidFloorSol: number;
+        rebalanceMinSol: number;
+        idleAsset: string;
+    };
 }
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -133,6 +141,14 @@ function parseConfig(): RuntimeConfig {
             priorityFeeMicroLamports: Math.max(0, getNumber(env('CREATOR_FEES_PRIORITY_FEE_MICROLAMPORTS'), 10_000)),
             computeUnitLimit: Math.max(1, getNumber(env('CREATOR_FEES_COMPUTE_UNIT_LIMIT'), 250000)),
             treasuryTopupReserveSol: Math.max(0, getNumber(env('CREATOR_FEES_TREASURY_TOPUP_RESERVE_SOL'), 0.01)),
+        },
+        treasuryStrategy: {
+            enabled: getBoolean(env('TREASURY_STRATEGY_ENABLED'), false),
+            intervalMs: Math.max(1000, getNumber(env('TREASURY_STRATEGY_INTERVAL_MS'), 900000)),
+            liquidTargetSol: Math.max(0, getNumber(env('TREASURY_STRATEGY_LIQUID_TARGET_SOL'), 5)),
+            liquidFloorSol: Math.max(0, getNumber(env('TREASURY_STRATEGY_LIQUID_FLOOR_SOL'), 2)),
+            rebalanceMinSol: Math.max(0, getNumber(env('TREASURY_STRATEGY_REBALANCE_MIN_SOL'), 1)),
+            idleAsset: getOptionalString(env('TREASURY_STRATEGY_IDLE_ASSET'), 'JitoSOL'),
         },
     };
 }

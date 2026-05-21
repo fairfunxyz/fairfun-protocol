@@ -39,3 +39,11 @@ min_claim_lamports = 100000000
 priority_fee_microlamports = 10000
 compute_unit_limit = 250000
 treasury_topup_reserve_sol = 0.1
+
+[treasury_strategy]
+enabled = false
+interval_ms = 900000
+liquid_target_sol = 5
+liquid_floor_sol = 2
+rebalance_min_sol = 1
+idle_asset = "JitoSOL"
