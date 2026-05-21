@@ -2121,7 +2121,10 @@ export default function mount() {
               update(`fetch-start:${reason}`),
             );
 
-            const activitySuffix =
+            const treasurySuffix = connectedAddress
+              ? `?wallet=${encodeURIComponent(connectedAddress)}`
+              : "";
+            const claimsSuffix =
               showOnlyMineActivity && connectedAddress
                 ? `?wallet=${encodeURIComponent(connectedAddress)}&mine=1`
                 : "";
@@ -2129,10 +2132,10 @@ export default function mount() {
               await Promise.all([
                 m("fetch leaderboard api", () => fetch(`/api/leaderboard`)),
                 m("fetch treasury api", () =>
-                  fetch(`/api/treasury${activitySuffix}`),
+                  fetch(`/api/treasury${treasurySuffix}`),
                 ),
                 m("fetch claims api", () =>
-                  fetch(`/api/claims${activitySuffix}`),
+                  fetch(`/api/claims${claimsSuffix}`),
                 ),
               ]);
             if (!leaderboardResponse || !treasuryResponse || !claimsResponse) {
