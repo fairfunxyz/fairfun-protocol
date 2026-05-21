@@ -11,11 +11,13 @@
         "dev:indexer": "bun --watch indexer.ts",
         "dev:claimer": "bun --watch claimer.ts",
         "dev:creator-fees": "bun --watch creator-fees.ts",
+        "dev:treasury-strategy": "bun --watch treasury-strategy.ts",
         "db:prune-zero-claim-events": "bun scripts/prune-zero-claim-events.ts",
         "start:web": "bun server.ts",
         "start:indexer": "bun indexer.ts",
         "start:claimer": "bun claimer.ts",
         "start:creator-fees": "bun creator-fees.ts",
+        "start:treasury-strategy": "bun treasury-strategy.ts",
         "test": "npm run build && npm run test:program && npm run check:program && npm run typecheck"
     },
     "dependencies": {
