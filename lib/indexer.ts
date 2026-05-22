@@ -4,10 +4,12 @@ import { getCurrentTokenPrice } from './gravity';
 import { connection, getLargestHolders, getTokenHolders, getTokenSupply, toNumber, TOKEN_MINT } from './solana';
 import {
     distributeTreasuryFees,
+    getAllHolders,
     getMeta,
     getLeaderboard,
     getMetaNumber,
     materializeIndexedClaimEvent,
+    recordHolderMovementEvent,
     resetAllHolderRewards,
     resetExcludedHolders,
     setMeta,
@@ -245,6 +247,65 @@ async function getClaimMaterializationStats(now: number) {
     };
 }
 
+function recordHolderMovementDiffs(params: {
+    previousHolders: Map<string, ReturnType<typeof getAllHolders>[number]>;
+    currentHolders: Map<string, { address: string; balance: number; tokenValueUsd: number }>;
+    now: number;
+}) {
+    let recorded = 0;
+
+    for (const holder of params.currentHolders.values()) {
+        const key = holder.address.toLowerCase();
+        const previous = params.previousHolders.get(key);
+        const previousBalance = previous?.tokenBalance ?? 0;
+        const previousValueUsd = previous?.tokenValueUsd ?? 0;
+        const delta = holder.balance - previousBalance;
+
+        if (Math.abs(delta) <= 1e-12) continue;
+
+        const movementKind =
+            previousBalance <= 0 && holder.balance > 0
+                ? 'enter'
+                : delta > 0
+                    ? 'increase'
+                    : holder.balance <= 0
+                        ? 'exit'
+                        : 'decrease';
+
+        recordHolderMovementEvent({
+            address: holder.address,
+            movementKind,
+            tokenDelta: delta,
+            tokenBalanceBefore: previousBalance,
+            tokenBalanceAfter: holder.balance,
+            tokenValueUsdBefore: previousValueUsd,
+            tokenValueUsdAfter: holder.tokenValueUsd,
+            timestamp: params.now,
+        });
+        recorded++;
+    }
+
+    for (const previous of params.previousHolders.values()) {
+        const key = previous.address.toLowerCase();
+        if (params.currentHolders.has(key)) continue;
+        if (previous.tokenBalance <= 0) continue;
+
+        recordHolderMovementEvent({
+            address: previous.address,
+            movementKind: 'exit',
+            tokenDelta: -previous.tokenBalance,
+            tokenBalanceBefore: previous.tokenBalance,
+            tokenBalanceAfter: 0,
+            tokenValueUsdBefore: previous.tokenValueUsd,
+            tokenValueUsdAfter: 0,
+            timestamp: params.now,
+        });
+        recorded++;
+    }
+
+    return recorded;
+}
+
 export async function indexLeaderboardSnapshot() {
     if (indexing) return { skipped: true, holdersProcessed: 0, priceUSD: 0, timestamp: Date.now() };
 
@@ -262,6 +323,9 @@ export async function indexLeaderboardSnapshot() {
                 ]);
 
                 let holders = await m('Fetch token holders', () => getTokenHolders());
+                const previousHolders = new Map(
+                    getAllHolders().map((holder) => [holder.address.toLowerCase(), holder])
+                );
 
                 const byOwner = new Map<string, { address: string; balance: number }>();
                 for (const holder of holders) {
@@ -290,6 +354,7 @@ export async function indexLeaderboardSnapshot() {
 
                 const activeAddresses = new Set<string>();
                 const excludedAddresses = new Set<string>();
+                const currentHolders = new Map<string, { address: string; balance: number; tokenValueUsd: number }>();
                 const newHolders: string[] = [];
 
                 for (const holder of byOwner.values()) {
@@ -299,8 +364,13 @@ export async function indexLeaderboardSnapshot() {
                     }
 
                     activeAddresses.add(holder.address.toLowerCase());
+                    currentHolders.set(holder.address.toLowerCase(), {
+                        address: holder.address,
+                        balance: holder.balance,
+                        tokenValueUsd: holder.balance * priceUSD,
+                    });
 
-                    const existing = getLeaderboard().find(h => h.address.toLowerCase() === holder.address.toLowerCase());
+                    const existing = previousHolders.get(holder.address.toLowerCase());
                     const wasZero = !existing || existing.tokenBalance === 0;
 
                     upsertHolderSnapshot({
@@ -317,6 +387,11 @@ export async function indexLeaderboardSnapshot() {
 
                 resetExcludedHolders(excludedAddresses, now);
                 zeroMissingHolderBalances(activeAddresses, now);
+                const holderMovementEvents = recordHolderMovementDiffs({
+                    previousHolders,
+                    currentHolders,
+                    now,
+                });
                 updateGravityForIndexedHolders(now);
 
                 // === NEW HOLDER DETECTION ===
@@ -358,6 +433,8 @@ export async function indexLeaderboardSnapshot() {
                 setMeta('lastClaimScanAt', now);
                 setMeta('lastGravityDelta', lastGravityDelta);
                 setMeta('totalAccumulatedGravity', feeDistribution.totalGravity);
+                setMeta('lastHolderMovementEventCount', holderMovementEvents);
+                setMeta('lastHolderMovementScanAt', now);
 
                 return {
                     skipped: false,
@@ -366,6 +443,7 @@ export async function indexLeaderboardSnapshot() {
                     totalSupply: supply.amount,
                     treasuryBalanceSol,
                     totalFeesAccumulatedSol,
+                    holderMovementEvents,
                     indexedClaimTransactions: claimMaterializationStats.indexedTransactions,
                     indexedClaimRecipients: claimMaterializationStats.indexedRecipients,
                     epochIndex,

@@ -81,6 +81,18 @@ export const db = new Database(dbPath, {
         amountSol: z.number(),
         createdAt: z.number().default(0)
     }),
+    holderMovementEvents: z.object({
+        address: z.string(),
+        movementKind: z.string(),
+        source: z.string().default('snapshot-diff'),
+        tokenDelta: z.number().default(0),
+        tokenBalanceBefore: z.number().default(0),
+        tokenBalanceAfter: z.number().default(0),
+        tokenValueUsdBefore: z.number().default(0),
+        tokenValueUsdAfter: z.number().default(0),
+        timestamp: z.number().default(0),
+        createdAt: z.number().default(0)
+    }),
     treasuryStrategyEvents: z.object({
         action: z.string(),
         status: z.string().default('planned'),
@@ -114,6 +126,7 @@ export const db = new Database(dbPath, {
         metadata: ['key'],
         treasuryEvents: ['signature', 'timestamp'],
         treasuryPayouts: ['signature', 'address'],
+        holderMovementEvents: ['address', 'movementKind', 'timestamp'],
         treasuryStrategyEvents: ['action', 'status', 'timestamp'],
         claimEvents: ['signature', 'claimantAddress', 'delegatorAddress', 'timestamp']
     },
@@ -122,6 +135,7 @@ export const db = new Database(dbPath, {
         metadata: [['key']],
         treasuryEvents: [['signature']],
         treasuryPayouts: [['signature', 'address']],
+        holderMovementEvents: [['address', 'movementKind', 'timestamp']],
         treasuryStrategyEvents: [['timestamp', 'action', 'reason']],
         claimEvents: [['signature', 'claimantAddress']]
     }
@@ -204,6 +218,20 @@ export interface TreasuryStrategySnapshot {
     lastCoverageRatio: number;
     lastLiquidTargetSol: number;
     parkedSolEquivalent: number;
+}
+
+export interface HolderMovementEventRecord {
+    id?: number;
+    address: string;
+    movementKind: string;
+    source: string;
+    tokenDelta: number;
+    tokenBalanceBefore: number;
+    tokenBalanceAfter: number;
+    tokenValueUsdBefore: number;
+    tokenValueUsdAfter: number;
+    timestamp: number;
+    createdAt: number;
 }
 
 export interface ClaimEventRecord {
@@ -573,6 +601,43 @@ export function getTreasuryStrategySnapshot(): TreasuryStrategySnapshot {
         lastLiquidTargetSol: getMetaNumber('treasuryStrategyLastLiquidTargetSol', 0),
         parkedSolEquivalent: getMetaNumber('treasuryStrategyParkedSolEquivalent', 0),
     };
+}
+
+export function recordHolderMovementEvent(event: {
+    address: string;
+    movementKind: 'enter' | 'increase' | 'decrease' | 'exit';
+    source?: string;
+    tokenDelta: number;
+    tokenBalanceBefore: number;
+    tokenBalanceAfter: number;
+    tokenValueUsdBefore: number;
+    tokenValueUsdAfter: number;
+    timestamp?: number;
+}) {
+    const now = event.timestamp ?? Date.now();
+    db.holderMovementEvents.upsert(
+        { address: event.address, movementKind: event.movementKind, timestamp: now },
+        {
+            address: event.address,
+            movementKind: event.movementKind,
+            source: event.source ?? 'snapshot-diff',
+            tokenDelta: event.tokenDelta,
+            tokenBalanceBefore: event.tokenBalanceBefore,
+            tokenBalanceAfter: event.tokenBalanceAfter,
+            tokenValueUsdBefore: event.tokenValueUsdBefore,
+            tokenValueUsdAfter: event.tokenValueUsdAfter,
+            timestamp: now,
+            createdAt: now,
+        }
+    );
+}
+
+export function getRecentHolderMovementEvents(limit = 50, walletAddress?: string) {
+    const query = db.holderMovementEvents.select().orderBy('timestamp', 'desc');
+    const events = query.limit(limit).all() as HolderMovementEventRecord[];
+    if (!walletAddress) return events;
+    const walletLower = walletAddress.toLowerCase();
+    return events.filter((event) => event.address.toLowerCase() === walletLower);
 }
 
 export function updateHolderRewards(
