@@ -1,5 +1,5 @@
 import { measure } from 'measure-fn';
-import { getRecentTreasuryEvents, getTreasurySummaryStats } from '../../../lib/database';
+import { getRecentTreasuryEvents, getRecentTreasuryStrategyEvents, getTreasuryStrategySnapshot, getTreasurySummaryStats } from '../../../lib/database';
 import { formatSOL, getCurrentSolPrice, formatUSD } from '../../../lib/gravity';
 import { formatAddress } from '../../../lib/solana';
 import { fetchTreasuryDepositorAddress } from '../../../lib/treasury';
@@ -14,6 +14,8 @@ export async function GET(req: Request) {
         const solPriceUsd = await getCurrentSolPrice();
         const creatorFeeStatus = await getCreatorFeeStatus();
         const rawEvents = getRecentTreasuryEvents(limit, wallet ?? undefined);
+        const strategySnapshot = getTreasuryStrategySnapshot();
+        const strategyEvents = getRecentTreasuryStrategyEvents(5);
         const events = await Promise.all(rawEvents.map(async (event) => {
             const depositorAddress = event.depositorAddress
                 || await fetchTreasuryDepositorAddress(event.signature, config.rewards.treasuryAddress);
@@ -42,6 +44,10 @@ export async function GET(req: Request) {
                 creatorFeeTopupTotalSol: summaryStats.creatorFeeTopupTotalSol,
                 externalRevenueSol: summaryStats.externalRevenueSol,
                 currentUnclaimedCreatorFeeSol: creatorFeeStatus.currentUnclaimedSol,
+            },
+            strategy: {
+                ...strategySnapshot,
+                events: strategyEvents,
             },
             solPriceUsd,
             timestamp: Date.now(),

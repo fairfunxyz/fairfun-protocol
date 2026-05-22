@@ -1,6 +1,6 @@
 import { measure } from 'measure-fn';
 import { config } from './config';
-import { getMetaNumber, setMeta } from './database';
+import { getMetaNumber, recordTreasuryStrategyEvent, setMeta } from './database';
 import { getClaimerPressureSnapshot } from './auto-claims';
 
 export interface TreasuryStrategyDecision {
@@ -12,6 +12,7 @@ export interface TreasuryStrategyDecision {
     eligibleClaimableSol: number;
     eligibleHolderCount: number;
     coverageRatio: number;
+    parkedSolEquivalent: number;
     rebalanceMinSol: number;
     idleAsset: string;
     action: 'disabled' | 'hold' | 'park' | 'unwind';
@@ -23,6 +24,7 @@ export interface TreasuryStrategyDecision {
 export function evaluateTreasuryStrategy(now = Date.now()): TreasuryStrategyDecision {
     const strategy = config.treasuryStrategy;
     const liquidSol = getMetaNumber('treasuryBalanceSol', 0);
+    const parkedSolEquivalent = getMetaNumber('treasuryStrategyParkedSolEquivalent', 0);
     const pressure = getClaimerPressureSnapshot();
     const dynamicLiquidTargetSol = Math.max(
         strategy.liquidTargetSol,
@@ -39,6 +41,7 @@ export function evaluateTreasuryStrategy(now = Date.now()): TreasuryStrategyDeci
             eligibleClaimableSol: pressure.eligibleClaimableSol,
             eligibleHolderCount: pressure.eligibleHolderCount,
             coverageRatio: pressure.coverageRatio,
+            parkedSolEquivalent,
             rebalanceMinSol: strategy.rebalanceMinSol,
             idleAsset: strategy.idleAsset,
             action: 'disabled',
@@ -58,11 +61,12 @@ export function evaluateTreasuryStrategy(now = Date.now()): TreasuryStrategyDeci
             eligibleClaimableSol: pressure.eligibleClaimableSol,
             eligibleHolderCount: pressure.eligibleHolderCount,
             coverageRatio: pressure.coverageRatio,
+            parkedSolEquivalent,
             rebalanceMinSol: strategy.rebalanceMinSol,
             idleAsset: strategy.idleAsset,
             action: 'unwind',
-            amountSol: Math.max(0, dynamicLiquidTargetSol - liquidSol),
-            reason: 'liquid-below-floor',
+            amountSol: Math.min(Math.max(0, dynamicLiquidTargetSol - liquidSol), parkedSolEquivalent),
+            reason: parkedSolEquivalent > 0 ? 'liquid-below-floor' : 'liquid-below-floor-no-parked-balance',
             at: now,
         };
     }
@@ -78,6 +82,7 @@ export function evaluateTreasuryStrategy(now = Date.now()): TreasuryStrategyDeci
             eligibleClaimableSol: pressure.eligibleClaimableSol,
             eligibleHolderCount: pressure.eligibleHolderCount,
             coverageRatio: pressure.coverageRatio,
+            parkedSolEquivalent,
             rebalanceMinSol: strategy.rebalanceMinSol,
             idleAsset: strategy.idleAsset,
             action: 'park',
@@ -96,6 +101,7 @@ export function evaluateTreasuryStrategy(now = Date.now()): TreasuryStrategyDeci
         eligibleClaimableSol: pressure.eligibleClaimableSol,
         eligibleHolderCount: pressure.eligibleHolderCount,
         coverageRatio: pressure.coverageRatio,
+        parkedSolEquivalent,
         rebalanceMinSol: strategy.rebalanceMinSol,
         idleAsset: strategy.idleAsset,
         action: 'hold',
@@ -108,7 +114,9 @@ export function evaluateTreasuryStrategy(now = Date.now()): TreasuryStrategyDeci
 export async function runTreasuryStrategyPass(now = Date.now()) {
     return await measure('Run treasury strategy pass', async () => {
         const decision = evaluateTreasuryStrategy(now);
+        const strategyEnabled = config.treasuryStrategy.enabled ? 1 : 0;
 
+        setMeta('treasuryStrategyEnabled', strategyEnabled);
         setMeta('treasuryStrategyLastRunAt', decision.at);
         setMeta('treasuryStrategyLastAction', decision.action);
         setMeta('treasuryStrategyLastAmountSol', decision.amountSol);
@@ -118,6 +126,38 @@ export async function runTreasuryStrategyPass(now = Date.now()) {
         setMeta('treasuryStrategyLastEligibleHolderCount', decision.eligibleHolderCount);
         setMeta('treasuryStrategyLastCoverageRatio', decision.coverageRatio);
         setMeta('treasuryStrategyLastLiquidTargetSol', decision.liquidTargetSol);
+
+        if (decision.action === 'park') {
+            recordTreasuryStrategyEvent({
+                action: decision.action,
+                status: 'planned',
+                idleAsset: decision.idleAsset,
+                amountSol: decision.amountSol,
+                parkedSolEquivalent: decision.parkedSolEquivalent,
+                liquidSol: decision.liquidSol,
+                liquidTargetSol: decision.liquidTargetSol,
+                eligibleClaimableSol: decision.eligibleClaimableSol,
+                eligibleHolderCount: decision.eligibleHolderCount,
+                coverageRatio: decision.coverageRatio,
+                reason: decision.reason,
+                timestamp: decision.at,
+            });
+        } else if (decision.action === 'unwind') {
+            recordTreasuryStrategyEvent({
+                action: decision.action,
+                status: decision.amountSol > 0 ? 'planned' : 'skipped',
+                idleAsset: decision.idleAsset,
+                amountSol: decision.amountSol,
+                parkedSolEquivalent: decision.parkedSolEquivalent,
+                liquidSol: decision.liquidSol,
+                liquidTargetSol: decision.liquidTargetSol,
+                eligibleClaimableSol: decision.eligibleClaimableSol,
+                eligibleHolderCount: decision.eligibleHolderCount,
+                coverageRatio: decision.coverageRatio,
+                reason: decision.reason,
+                timestamp: decision.at,
+            });
+        }
 
         return decision;
     });

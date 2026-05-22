@@ -81,6 +81,22 @@ export const db = new Database(dbPath, {
         amountSol: z.number(),
         createdAt: z.number().default(0)
     }),
+    treasuryStrategyEvents: z.object({
+        action: z.string(),
+        status: z.string().default('planned'),
+        idleAsset: z.string().default('JitoSOL'),
+        amountSol: z.number().default(0),
+        parkedSolEquivalent: z.number().default(0),
+        liquidSol: z.number().default(0),
+        liquidTargetSol: z.number().default(0),
+        eligibleClaimableSol: z.number().default(0),
+        eligibleHolderCount: z.number().default(0),
+        coverageRatio: z.number().default(0),
+        reason: z.string().default(''),
+        signature: z.string().default(''),
+        timestamp: z.number().default(0),
+        createdAt: z.number().default(0)
+    }),
     claimEvents: z.object({
         signature: z.string(),
         claimantAddress: z.string(),
@@ -98,6 +114,7 @@ export const db = new Database(dbPath, {
         metadata: ['key'],
         treasuryEvents: ['signature', 'timestamp'],
         treasuryPayouts: ['signature', 'address'],
+        treasuryStrategyEvents: ['action', 'status', 'timestamp'],
         claimEvents: ['signature', 'claimantAddress', 'delegatorAddress', 'timestamp']
     },
     unique: {
@@ -105,6 +122,7 @@ export const db = new Database(dbPath, {
         metadata: [['key']],
         treasuryEvents: [['signature']],
         treasuryPayouts: [['signature', 'address']],
+        treasuryStrategyEvents: [['timestamp', 'action', 'reason']],
         claimEvents: [['signature', 'claimantAddress']]
     }
 });
@@ -154,6 +172,38 @@ export interface TreasuryPayoutRecord {
     address: string;
     amountSol: number;
     createdAt: number;
+}
+
+export interface TreasuryStrategyEventRecord {
+    id?: number;
+    action: string;
+    status: string;
+    idleAsset: string;
+    amountSol: number;
+    parkedSolEquivalent: number;
+    liquidSol: number;
+    liquidTargetSol: number;
+    eligibleClaimableSol: number;
+    eligibleHolderCount: number;
+    coverageRatio: number;
+    reason: string;
+    signature: string;
+    timestamp: number;
+    createdAt: number;
+}
+
+export interface TreasuryStrategySnapshot {
+    enabled: boolean;
+    idleAsset: string;
+    lastRunAt: number | null;
+    lastAction: string;
+    lastReason: string;
+    lastAmountSol: number;
+    lastEligibleClaimableSol: number;
+    lastEligibleHolderCount: number;
+    lastCoverageRatio: number;
+    lastLiquidTargetSol: number;
+    parkedSolEquivalent: number;
 }
 
 export interface ClaimEventRecord {
@@ -462,6 +512,66 @@ export function getTreasurySummaryStats(creatorFeeClaimerAddress?: string): Trea
         totalDepositedSol,
         creatorFeeTopupTotalSol,
         externalRevenueSol: Math.max(0, totalDepositedSol - creatorFeeTopupTotalSol),
+    };
+}
+
+export function recordTreasuryStrategyEvent(event: {
+    action: 'disabled' | 'hold' | 'park' | 'unwind';
+    status: 'planned' | 'skipped' | 'executed' | 'failed';
+    idleAsset: string;
+    amountSol: number;
+    parkedSolEquivalent: number;
+    liquidSol: number;
+    liquidTargetSol: number;
+    eligibleClaimableSol: number;
+    eligibleHolderCount: number;
+    coverageRatio: number;
+    reason: string;
+    signature?: string;
+    timestamp?: number;
+}) {
+    const now = event.timestamp ?? Date.now();
+    db.treasuryStrategyEvents.upsert(
+        { timestamp: now, action: event.action, reason: event.reason },
+        {
+            action: event.action,
+            status: event.status,
+            idleAsset: event.idleAsset,
+            amountSol: event.amountSol,
+            parkedSolEquivalent: event.parkedSolEquivalent,
+            liquidSol: event.liquidSol,
+            liquidTargetSol: event.liquidTargetSol,
+            eligibleClaimableSol: event.eligibleClaimableSol,
+            eligibleHolderCount: event.eligibleHolderCount,
+            coverageRatio: event.coverageRatio,
+            reason: event.reason,
+            signature: event.signature ?? '',
+            timestamp: now,
+            createdAt: now,
+        }
+    );
+}
+
+export function getRecentTreasuryStrategyEvents(limit = 10) {
+    return db.treasuryStrategyEvents.select()
+        .orderBy('timestamp', 'desc')
+        .limit(limit)
+        .all() as TreasuryStrategyEventRecord[];
+}
+
+export function getTreasuryStrategySnapshot(): TreasuryStrategySnapshot {
+    return {
+        enabled: getMeta('treasuryStrategyEnabled') === 'true' || getMeta('treasuryStrategyEnabled') === '1',
+        idleAsset: getMeta('treasuryStrategyIdleAsset') || 'JitoSOL',
+        lastRunAt: getMetaNumber('treasuryStrategyLastRunAt', 0) || null,
+        lastAction: getMeta('treasuryStrategyLastAction') || 'disabled',
+        lastReason: getMeta('treasuryStrategyLastReason') || '',
+        lastAmountSol: getMetaNumber('treasuryStrategyLastAmountSol', 0),
+        lastEligibleClaimableSol: getMetaNumber('treasuryStrategyLastEligibleClaimableSol', 0),
+        lastEligibleHolderCount: getMetaNumber('treasuryStrategyLastEligibleHolderCount', 0),
+        lastCoverageRatio: getMetaNumber('treasuryStrategyLastCoverageRatio', 0),
+        lastLiquidTargetSol: getMetaNumber('treasuryStrategyLastLiquidTargetSol', 0),
+        parkedSolEquivalent: getMetaNumber('treasuryStrategyParkedSolEquivalent', 0),
     };
 }
 

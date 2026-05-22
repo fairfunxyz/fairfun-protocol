@@ -86,6 +86,36 @@ interface TreasurySummary {
   currentUnclaimedCreatorFeeSol: number;
 }
 
+interface TreasuryStrategyEvent {
+  action: string;
+  status: string;
+  idleAsset: string;
+  amountSol: number;
+  parkedSolEquivalent: number;
+  liquidSol: number;
+  liquidTargetSol: number;
+  eligibleClaimableSol: number;
+  eligibleHolderCount: number;
+  coverageRatio: number;
+  reason: string;
+  timestamp: number;
+}
+
+interface TreasuryStrategySummary {
+  enabled: boolean;
+  idleAsset: string;
+  lastRunAt: number | null;
+  lastAction: string;
+  lastReason: string;
+  lastAmountSol: number;
+  lastEligibleClaimableSol: number;
+  lastEligibleHolderCount: number;
+  lastCoverageRatio: number;
+  lastLiquidTargetSol: number;
+  parkedSolEquivalent: number;
+  events: TreasuryStrategyEvent[];
+}
+
 interface WalletTotals {
   address: string;
   addressShort: string;
@@ -124,6 +154,7 @@ interface TreasuryResponse {
   events: TreasuryEvent[];
   total: number;
   summary: TreasurySummary;
+  strategy?: TreasuryStrategySummary;
 }
 
 interface ClaimsResponse {
@@ -969,6 +1000,7 @@ function TreasuryTable({
   runtimeConfig,
   events,
   summary,
+  strategy,
   loading,
   error,
   connectedAddress,
@@ -976,6 +1008,7 @@ function TreasuryTable({
   runtimeConfig: RuntimeConfig;
   events: TreasuryEvent[];
   summary: TreasurySummary | null;
+  strategy: TreasuryStrategySummary | null;
   loading: boolean;
   error: string | null;
   connectedAddress: string | null;
@@ -1002,6 +1035,52 @@ function TreasuryTable({
               {formatNumber(summary.currentUnclaimedCreatorFeeSol, "sol")}
             </div>
           </div>
+          {strategy?.enabled ? (
+            <div className="activity-stat-card">
+              <div className="small-label">{strategy.idleAsset} Planned</div>
+              <div className="inline-value">
+                {formatNumber(strategy.parkedSolEquivalent, "sol")}
+              </div>
+              <div className="num-sub">
+                {strategy.lastAction} · {formatRelativeTime(strategy.lastRunAt ?? 0)}
+              </div>
+            </div>
+          ) : null}
+          {strategy?.enabled ? (
+            <div className="activity-stat-card">
+              <div className="small-label">Liquid Target</div>
+              <div className="inline-value">
+                {formatNumber(strategy.lastLiquidTargetSol, "sol")}
+              </div>
+              <div className="num-sub">
+                {formatNumber(strategy.lastEligibleClaimableSol, "sol")} claim pressure
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {strategy?.enabled && strategy.events.length > 0 ? (
+        <div className="activity-stats-grid">
+          {strategy.events.slice(0, 3).map((event) => (
+            <div
+              className="activity-stat-card"
+              key={`${event.timestamp}-${event.action}-${event.reason}`}
+            >
+              <div className="small-label">
+                {event.action === "park"
+                  ? `${event.idleAsset} Park Plan`
+                  : event.action === "unwind"
+                    ? `${event.idleAsset} Unwind Plan`
+                    : "Treasury Strategy"}
+              </div>
+              <div className="inline-value">
+                {formatNumber(event.amountSol, "sol")}
+              </div>
+              <div className="num-sub">
+                {formatCompactTimestamp(event.timestamp)} · {event.reason}
+              </div>
+            </div>
+          ))}
         </div>
       ) : null}
       <table className="leaderboard-table">
@@ -1240,6 +1319,7 @@ function ActivityPanel({
   treasuryEvents,
   claimEvents,
   treasurySummary,
+  treasuryStrategy,
   claimsSummary,
   nextAutoClaimAt,
   claimerStatus,
@@ -1260,6 +1340,7 @@ function ActivityPanel({
   treasuryEvents: TreasuryEvent[];
   claimEvents: ClaimEvent[];
   treasurySummary: TreasurySummary | null;
+  treasuryStrategy: TreasuryStrategySummary | null;
   claimsSummary: ClaimsSummary | null;
   nextAutoClaimAt: number | null;
   claimerStatus: ClaimerStatus | null;
@@ -1335,6 +1416,7 @@ function ActivityPanel({
             runtimeConfig={runtimeConfig}
             events={treasuryEvents}
             summary={treasurySummary}
+            strategy={treasuryStrategy}
             loading={loading}
             error={error}
             connectedAddress={connectedAddress}
@@ -1395,6 +1477,7 @@ export default function mount() {
     let treasuryEvents: TreasuryEvent[] = [];
     let claimEvents: ClaimEvent[] = [];
     let treasurySummary: TreasurySummary | null = null;
+    let treasuryStrategy: TreasuryStrategySummary | null = null;
     let claimsSummary: ClaimsSummary | null = null;
     let nextAutoClaimAt: number | null = null;
     let claimerStatus: ClaimerStatus | null = null;
@@ -1490,6 +1573,7 @@ export default function mount() {
             treasuryEvents={treasuryEvents}
             claimEvents={claimEvents}
             treasurySummary={treasurySummary}
+            treasuryStrategy={treasuryStrategy}
             claimsSummary={claimsSummary}
             nextAutoClaimAt={nextAutoClaimAt}
             claimerStatus={claimerStatus}
@@ -2235,6 +2319,7 @@ export default function mount() {
             if (treasuryData.success) {
               treasuryEvents = treasuryData.events;
               treasurySummary = treasuryData.summary ?? null;
+              treasuryStrategy = treasuryData.strategy ?? null;
             } else if (!error) {
               error = "Failed to load treasury additions.";
             }
